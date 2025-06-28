@@ -31,28 +31,31 @@ clean-targets:         # directories to be removed by `dbt clean`
 # files using the `{{ config(...) }}` macro.
 models:
   dbt_training:
-    # Config indicated by + and applies to all files under models/example/
     example:
       +materialized: view
     dbt_test:
       +materialized: table  
-      #+schema: "{{ target.schema }}"
       +database: "{{ target.database }}"
-      +pre-hook:
-        - "{{ log_model_events('start', 'model execution started') }}"
-      +post-hook:
-        - "{{ log_model_events('end', 'success') }}"
+#      +pre-hook:
+#        - "{{ log_model_events(this.name, 'start', 'model execution started') }}"
+      # Remove post-hook — error cases won’t reach here
 
 seeds:
   dbt_training:
     +database: "{{ target.database }}"
-    +pre-hook:
-      - "{{ log_model_event('start', 'Seed execution started') }}"
-    +post-hook:
-      - "{{ log_model_event('end', 'Success') }}"
+#    +pre-hook: 
+#      - "{{ log_model_events(this.name, 'start', 'seed execution started') }}"
+    # Note: post-hook not reliable for failed seeds — capture in on-run-end
+
+# Global Hooks
+on-run-start:
+  - "{{ log_run_start() }}"
 
 on-run-end:
-  - >
-    {% for result in results if result.status != 'success' %}
-      {{ log_model_events('error', 'Failure:' ~ result.message) }}
-    {% endfor %}
+  - "{{ log_run_results() }}"
+
+#on-run-end:
+#  - >
+#    {% for result in results if result.status != 'success' %}
+#    {{ log_model_events('error', 'Failure:' ~ result.message) }}
+#    {% endfor %}

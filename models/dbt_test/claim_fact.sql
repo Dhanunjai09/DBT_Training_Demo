@@ -44,7 +44,8 @@ SELECT
     cu.First_Name,
     cu.Last_Name,
     cu.Country,
-    cu.Phone_1
+    cu.Phone_1,
+    cu_BAD_COLUMN
 
 FROM claims cl
 JOIN policies po ON cl.Policy_Id = po.Policy_Id
