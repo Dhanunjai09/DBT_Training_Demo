@@ -4,6 +4,7 @@
 {% endif %}
 
 {% set mismatches = [] %}
+{% set matches = [] %}
 
 {% for pair in pairs %}
   {% set model_1 = pair[0] %}
@@ -44,45 +45,53 @@
       'hash_2': hash_2,
       'log_message': message
     }) %}
+  {% else %}
+    {% set message = "✅ Hash match: " ~ model_1 ~ " = " ~ model_2 %}
+    {% do matches.append({
+      'model_1': model_1,
+      'model_2': model_2,
+      'hash_1': hash_1,
+      'hash_2': hash_2,
+      'log_message': message
+    }) %}
   {% endif %}
 {% endfor %}
 
-{% if mismatches | length > 0 %}
-  {% for mismatch in mismatches %}
-    {% set insert_sql %}
-      insert into {{ log_table }}
-      (model_1, model_2, hash_1, hash_2, compared_at, run_started_at, invocation_id, log_message)
-      values (
-        '{{ mismatch.model_1 }}',
-        '{{ mismatch.model_2 }}',
-        '{{ mismatch.hash_1 }}',
-        '{{ mismatch.hash_2 }}',
-        current_timestamp,
-        '{{ run_started_at }}',
-        '{{ invocation_id }}',
-        '{{ mismatch.log_message }}'
-      )
-    {% endset %}
-    {% do run_query(insert_sql) %}
-    {{ log(mismatch.log_message, info=True) }}
-  {% endfor %}
-{% else %}
-  {% set success_message = "✅ All table hash comparisons matched." %}
-  {% set insert_success_sql %}
+{% for mismatch in mismatches %}
+  {% set insert_sql %}
     insert into {{ log_table }}
     (model_1, model_2, hash_1, hash_2, compared_at, run_started_at, invocation_id, log_message)
     values (
-      null,
-      null,
-      null,
-      null,
+      '{{ mismatch.model_1 }}',
+      '{{ mismatch.model_2 }}',
+      '{{ mismatch.hash_1 }}',
+      '{{ mismatch.hash_2 }}',
       current_timestamp,
       '{{ run_started_at }}',
       '{{ invocation_id }}',
-      '{{ success_message }}'
+      '{{ mismatch.log_message }}'
     )
   {% endset %}
-  {% do run_query(insert_success_sql) %}
-  {{ log(success_message, info=True) }}
-{% endif %}
+  {% do run_query(insert_sql) %}
+  {{ log(mismatch.log_message, info=True) }}
+{% endfor %}
+
+{% for match in matches %}
+  {% set insert_sql %}
+    insert into {{ log_table }}
+    (model_1, model_2, hash_1, hash_2, compared_at, run_started_at, invocation_id, log_message)
+    values (
+      '{{ match.model_1 }}',
+      '{{ match.model_2 }}',
+      '{{ match.hash_1 }}',
+      '{{ match.hash_2 }}',
+      current_timestamp,
+      '{{ run_started_at }}',
+      '{{ invocation_id }}',
+      '{{ match.log_message }}'
+    )
+  {% endset %}
+  {% do run_query(insert_sql) %}
+  {{ log(match.log_message, info=True) }}
+{% endfor %}
 {% endmacro %}
