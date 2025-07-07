@@ -1,9 +1,9 @@
-{% macro TABLE_HASH_V(pair, log_table=None, exclude_columns=[]) %}
+{% macro incremental_hash(model_1, log_table=None, exclude_columns=[]) %}
 {% if log_table is none %}
 --  {% set log_table = target.database ~ '.' ~ target.schema ~ '.hash_mismatch_log' %}
 {% endif %}
 
- {% set model_1 = pair %}
+-- {% set model_1 = pair %}
  
 {% if execute %}
  {% set columns_query %}

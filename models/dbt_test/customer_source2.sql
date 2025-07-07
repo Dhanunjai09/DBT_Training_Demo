@@ -7,7 +7,7 @@
   ) 
 }}
 
-{% set hash1 = TABLE_HASH_V('customers', exclude_columns=['created_at', 'updated_at']) %}
+{% set hash1 = incremental_hash('customers', exclude_columns=['created_at', 'updated_at']) %}
 {% set cleaned_name = hash1 | replace('as hash_val', '') %}
 {{ log("Updated hash expression: " ~ cleaned_name, info=True) }}
 
