@@ -1,2 +1,2 @@
 
-SELECT * FROM {{ ref('claims_seed') }}
+SELECT * FROM {{ ref('claims_seed') }}  order by claim_id
