@@ -1,0 +1,1 @@
+SELECT * FROM {{ ref('claims_seed') }}  where claim_id =1001
