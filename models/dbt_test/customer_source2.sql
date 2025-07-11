@@ -8,13 +8,13 @@
 }}
 
 {% set hash1 = incremental_hash('customers', exclude_columns=['created_at', 'updated_at']) %}
-{% set cleaned_name = hash1 | replace('as hash_val', '') %}
+--{% set cleaned_name = hash1 | replace('as hash_val', '') %}
 {{ log("Updated hash expression: " ~ cleaned_name, info=True) }}
 
 
 SELECT * FROM {{ ref('customers') }}
 {% if is_incremental() %}
-WHERE NOT EXISTS (SELECT hash_val FROM {{ this }} WHERE customer_id = customers.customer_id and hash_val={{ cleaned_name }})
+WHERE NOT EXISTS (SELECT hash_val FROM {{ this }} WHERE customer_id = customers.customer_id and hash_val={{ hash1 }})
 {% endif %}
 
 

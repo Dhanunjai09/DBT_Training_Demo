@@ -2,6 +2,6 @@
 
 {% macro run_hash_comparison() %}
   {{ compare_table_hashes_with_logging([
-      ('customers', 'customer_source')
+      ('cust1', 'customer_source')
   ], exclude_columns=['last_updated']) }}
 {% endmacro %}

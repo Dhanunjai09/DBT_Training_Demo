@@ -1,9 +1,8 @@
-{% macro incremental_hash(model_1, log_table=None, exclude_columns=[]) %}
+{% macro incremental_hash(pair, log_table=None, exclude_columns=[]) %}
 {% if log_table is none %}
---  {% set log_table = target.database ~ '.' ~ target.schema ~ '.hash_mismatch_log' %}
 {% endif %}
 
--- {% set model_1 = pair %}
+{% set model_1 = pair %}
  
 {% if execute %}
  {% set columns_query %}
@@ -19,7 +18,7 @@
   {% set columns = all_columns | reject("in", exclude_columns) | list %}
   {% set col1 = columns|join('||')%}
   {{ log("Joined string: " ~ col1, info=True) }}
-
+  
 
   {% set hash_1_query %}
     md5(
@@ -27,6 +26,8 @@
      as hash_val
   {% endset %}
 
-  {{ return(hash_1_query) }} 
+  {% set hash_val = hash_1_query | replace('as hash_val', '') %}
+
+  {{ return(hash_val) }} 
  {% endif %} 
 {% endmacro %}
