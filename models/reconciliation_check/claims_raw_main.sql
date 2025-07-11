@@ -1,0 +1,1 @@
+SELECT * FROM {{ ref('claims_seed_raw_main') }}

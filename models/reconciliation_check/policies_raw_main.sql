@@ -1,0 +1,1 @@
+SELECT * FROM {{ ref('policies_seed_raw_main') }}
