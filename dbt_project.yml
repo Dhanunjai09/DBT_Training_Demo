@@ -1,42 +1,74 @@
+# =============================================================================
+# dbt_project.yml — Kinaxis / Refresco Analytics
+# ALL values come from dbt Cloud Environment Variables (DBT_ prefix).
+# Zero hardcoding in this file or in macros.
+# =============================================================================
 
-# Name your project! Project names should contain only lowercase characters
-# and underscores. A good package name should reflect your organization's
-# name or the intended use of these models
-name: 'my_new_project'
+name: 'kinaxis'
 version: '1.0.0'
 config-version: 2
 
-# This setting configures which "profile" dbt uses for this project.
 profile: 'default'
 
-# These configurations specify where dbt should look for different types of files.
-# The `model-paths` config, for example, states that models in this project can be
-# found in the "models/" directory. You probably won't need to change these!
-model-paths: ["models"]
+model-paths:    ["models"]
 analysis-paths: ["analyses"]
-test-paths: ["tests"]
-seed-paths: ["seeds"]
-macro-paths: ["macros"]
+test-paths:     ["tests"]
+seed-paths:     ["seeds"]
+macro-paths:    ["macros"]
 snapshot-paths: ["snapshots"]
 
-target-path: "target"  # directory which will store compiled SQL files
-clean-targets:         # directories to be removed by `dbt clean`
+target-path: "target"
+clean-targets:
   - "target"
   - "dbt_packages"
 
+# =============================================================================
+# VARS — every value reads from a DBT_ environment variable set in dbt Cloud.
+# No fallback defaults — forces all environments to be explicitly configured.
+# =============================================================================
+vars:
 
-# Configuring models
-# Full documentation: https://docs.getdbt.com/docs/configuring-models
+  # ── Database (changes per environment: DEV / QA / PRD)
+  audit_db:         "{{ env_var('DBT_AUDIT_DB') }}"
 
-# In dbt, the default materialization for a model is a view. This means, when you run 
-# dbt run or dbt build, all of your models will be built as a view in your data platform. 
-# The configuration below will override this setting for models in the example folder to 
-# instead be materialized as tables. Any models you add to the root of the models folder will 
-# continue to be built as views. These settings can be overridden in the individual model files
-# using the `{{ config(...) }}` macro.
+  # ── Pipeline user (changes per environment)
+  pipeline_user:    "{{ env_var('DBT_PIPELINE_USER') }}"
 
+  # ── Schema names
+  src_schema:       "{{ env_var('DBT_SRC_SCHEMA') }}"
+  trans_schema:     "{{ env_var('DBT_TRANS_SCHEMA') }}"
+  reporting_schema: "{{ env_var('DBT_REPORTING_SCHEMA') }}"
+
+  # ── Audit + control table names
+  audit_table:      "{{ env_var('DBT_AUDIT_TABLE') }}"
+  audit_seq:        "{{ env_var('DBT_AUDIT_SEQ') }}"
+  row_count_table:  "{{ env_var('DBT_ROW_COUNT_TABLE') }}"
+  control_table:    "{{ env_var('DBT_CONTROL_TABLE') }}"
+  sttm_table:       "{{ env_var('DBT_STTM_TABLE') }}"
+
+  # ── Table suffix conventions
+  temp_suffix:      "{{ env_var('DBT_TEMP_SUFFIX') }}"
+  error_suffix:     "{{ env_var('DBT_ERROR_SUFFIX') }}"
+
+  # ── Incremental watermark column
+  incremental_col:          "{{ env_var('DBT_INCREMENTAL_COL') }}"
+  incremental_default_date: "{{ env_var('DBT_INCREMENTAL_DEFAULT_DATE') }}"
+
+  # ── Standard column names used across all tables
+  col_active_flag:      "{{ env_var('DBT_COL_ACTIVE_FLAG') }}"
+  col_created_by:       "{{ env_var('DBT_COL_CREATED_BY') }}"
+  col_modified_by:      "{{ env_var('DBT_COL_MODIFIED_BY') }}"
+  col_created_date:     "{{ env_var('DBT_COL_CREATED_DATE') }}"
+  col_modified_date:    "{{ env_var('DBT_COL_MODIFIED_DATE') }}"
+  col_error_reason:     "{{ env_var('DBT_COL_ERROR_REASON') }}"
+  col_error_captured_at: "{{ env_var('DBT_COL_ERROR_CAPTURED_AT') }}"
+
+# =============================================================================
+# MODELS
+# =============================================================================
 models:
-  my_new_project:
-    # Applies to all files under models/example/
-    example:
-      +materialized: table
+  kinaxis:
+    +persist_docs:
+      relation: true
+      columns: true
+    +materialized: "incremental"
