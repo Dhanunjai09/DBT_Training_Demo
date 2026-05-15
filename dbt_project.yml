@@ -1,7 +1,7 @@
 # =============================================================================
 # dbt_project.yml — Kinaxis / Refresco Analytics
-# ALL values come from dbt Cloud Environment Variables (DBT_ prefix).
-# Zero hardcoding in this file or in macros.
+# ALL configuration in this file — no environment variables needed.
+# To switch environments change audit_db and pipeline_user only.
 # =============================================================================
 
 name: 'kinaxis'
@@ -23,45 +23,43 @@ clean-targets:
   - "dbt_packages"
 
 # =============================================================================
-# VARS — every value reads from a DBT_ environment variable set in dbt Cloud.
-# No fallback defaults — forces all environments to be explicitly configured.
+# VARS — everything lives here, nothing in dbt Cloud environment variables
+# To deploy to QA: change audit_db to REFRESCO_ANALYTICS_QA
+# To deploy to PRD: change audit_db to REFRESCO_ANALYTICS_PRD
 # =============================================================================
 vars:
 
-  # ── Database (changes per environment: DEV / QA / PRD)
-  audit_db:         "{{ env_var('DBT_AUDIT_DB') }}"
+  # ── Environment (change this per environment) ──────────────────────────────
+  audit_db:       "REFRESCO_ANALYTICS_DEV"
+  pipeline_user:  "SYSTEM"
 
-  # ── Pipeline user (changes per environment)
-  pipeline_user:    "{{ env_var('DBT_PIPELINE_USER') }}"
+  # ── Schema names ───────────────────────────────────────────────────────────
+  src_schema:       "EXTRACT_SAP"
+  trans_schema:     "TRANSFORMATION_EU_PLANNING"
+  reporting_schema: "REPORTING_EU_PLANNING"
 
-  # ── Schema names
-  src_schema:       "{{ env_var('DBT_SRC_SCHEMA') }}"
-  trans_schema:     "{{ env_var('DBT_TRANS_SCHEMA') }}"
-  reporting_schema: "{{ env_var('DBT_REPORTING_SCHEMA') }}"
+  # ── Control / metadata tables ──────────────────────────────────────────────
+  audit_table:      "BATCH_AUDIT_LOG"
+  audit_seq:        "BATCH_AUDIT_SEQ"
+  row_count_table:  "SRC_TGT_ROW_COUNT"
+  sttm_table:       "STTM_UPDATED"
 
-  # ── Audit + control table names
-  audit_table:      "{{ env_var('DBT_AUDIT_TABLE') }}"
-  audit_seq:        "{{ env_var('DBT_AUDIT_SEQ') }}"
-  row_count_table:  "{{ env_var('DBT_ROW_COUNT_TABLE') }}"
-  control_table:    "{{ env_var('DBT_CONTROL_TABLE') }}"
-  sttm_table:       "{{ env_var('DBT_STTM_TABLE') }}"
+  # ── Table suffix conventions ───────────────────────────────────────────────
+  temp_suffix:  "_TEMP"
+  error_suffix: "_ERROR"
 
-  # ── Table suffix conventions
-  temp_suffix:      "{{ env_var('DBT_TEMP_SUFFIX') }}"
-  error_suffix:     "{{ env_var('DBT_ERROR_SUFFIX') }}"
+  # ── Incremental watermark ──────────────────────────────────────────────────
+  incremental_col:          "INSERTEDAT"
+  incremental_default_date: "1900-01-01"
 
-  # ── Incremental watermark column
-  incremental_col:          "{{ env_var('DBT_INCREMENTAL_COL') }}"
-  incremental_default_date: "{{ env_var('DBT_INCREMENTAL_DEFAULT_DATE') }}"
-
-  # ── Standard column names used across all tables
-  col_active_flag:      "{{ env_var('DBT_COL_ACTIVE_FLAG') }}"
-  col_created_by:       "{{ env_var('DBT_COL_CREATED_BY') }}"
-  col_modified_by:      "{{ env_var('DBT_COL_MODIFIED_BY') }}"
-  col_created_date:     "{{ env_var('DBT_COL_CREATED_DATE') }}"
-  col_modified_date:    "{{ env_var('DBT_COL_MODIFIED_DATE') }}"
-  col_error_reason:     "{{ env_var('DBT_COL_ERROR_REASON') }}"
-  col_error_captured_at: "{{ env_var('DBT_COL_ERROR_CAPTURED_AT') }}"
+  # ── Standard column names ──────────────────────────────────────────────────
+  col_active_flag:       "ACTIVE_FLAG"
+  col_created_by:        "CREATED_BY"
+  col_modified_by:       "MODIFIED_BY"
+  col_created_date:      "CREATED_DATE"
+  col_modified_date:     "MODIFIED_DATE"
+  col_error_reason:      "ERROR_REASON"
+  col_error_captured_at: "ERROR_CAPTURED_AT"
 
 # =============================================================================
 # MODELS
