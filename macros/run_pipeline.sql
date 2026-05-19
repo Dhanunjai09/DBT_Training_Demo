@@ -1,9 +1,16 @@
 {# =============================================================================
    FILE: macros/run_pipeline.sql
    PURPOSE: Master pipeline orchestrator — single entry point.
-            Table metadata resolved dynamically from STTM_UPDATED.
-            Stage 1 uses same incremental logic for all tables.
-            Stage 3 uses STG_REFRESH_TYPE from STTM for MERGE vs UPDATE only.
+            Resolves all table metadata dynamically from STTM_UPDATED.
+            Creates tables if not exist before loading.
+            Per-entity audit tables auto-created if not exist.
+
+   FULL FLOW:
+     STTM_UPDATED (ACTIVE_FLAG=TRUE)
+       → Step 0: ensure_pipeline_tables_batch  (create TARGET/_TEMP/_ERROR if missing)
+       → Stage 1: load_raw_to_temp_multi       (EXTRACT_SAP → _TEMP, incremental)
+       → Stage 2: identify_errors_multi        (_TEMP → _ERROR, NULL PK rows)
+       → Stage 3: load_temp_to_target_multi    (_TEMP clean → TARGET, DELTA/FULL)
 
    USAGE:
      dbt run-operation run_pipeline --args '{"table_name": "ALL"}'
@@ -13,9 +20,12 @@
 {% macro _resolve_pipeline_tables(table_name) %}
     {% if not execute %}{{ return([]) }}{% endif %}
 
-    {% set STTM_TBL = var('audit_db') ~ '.' ~ var('trans_schema') ~ '.' ~ var('sttm_table') %}
+    {% set STTM_TBL = var('target_database') ~ '.' ~
+                      var('trans_schema') ~ '.' ~
+                      var('sttm_table') %}
 
-    {% set filter = "ACTIVE_FLAG = TRUE" if table_name | upper == 'ALL'
+    {% set filter = "ACTIVE_FLAG = TRUE"
+        if table_name | upper == 'ALL'
         else "ACTIVE_FLAG = TRUE AND UPPER(STG_ENTITY) = UPPER('" ~ table_name ~ "')" %}
 
     {% set res = run_query(
@@ -27,7 +37,8 @@
 
     {% if res is none or (res.rows | length) == 0 %}
         {{ exceptions.raise_compiler_error(
-            "No active tables found in STTM for table_name='" ~ table_name ~ "'."
+            "No active tables found in STTM for table_name='" ~ table_name ~ "'. " ~
+            "Check STTM_UPDATED ACTIVE_FLAG and STG_ENTITY values."
         ) }}
     {% endif %}
 
@@ -47,37 +58,47 @@
 {% macro run_pipeline(table_name='ALL') %}
     {% if not execute %}{{ return('') }}{% endif %}
 
-    {{ log("=== run_pipeline START | table_name=" ~ table_name ~ " | env=" ~ target.name ~ " ===", info=True) }}
+    {{ log("=== run_pipeline START | table_name=" ~ table_name ~
+           " | env=" ~ target.name ~
+           " | db=" ~ var('target_database') ~ " ===", info=True) }}
 
+    {# Resolve table list from STTM — one query drives everything #}
     {% set pipeline_tables = _resolve_pipeline_tables(table_name) %}
 
     {{ log("Tables: " ~ (pipeline_tables | map(attribute='stg_entity') | join(', ')), info=True) }}
 
+    {# Batch-level audit — uses first table's trans_entity #}
     {% set batch_audit_id = audit_log_insert(
-        job_name   = 'RUN_PIPELINE_' ~ table_name,
-        job_id     = invocation_id,
-        job_status = 'RUNNING',
-        comments   = 'Tables=' ~ (pipeline_tables | map(attribute='stg_entity') | join(','))
+        trans_entity = pipeline_tables[0].trans_entity,
+        job_name     = 'RUN_PIPELINE_' ~ table_name,
+        job_status   = 'RUNNING',
+        comments     = 'db=' ~ var('target_database') ~
+                       ' | Tables=' ~ (pipeline_tables | map(attribute='stg_entity') | join(','))
     ) %}
 
-    {# Stage 1: EXTRACT_SAP → _TEMP
-       Same incremental logic for all tables.
-       First run loads all rows, subsequent runs load only new rows. #}
+    {# Step 0: Ensure TARGET, _TEMP, _ERROR tables exist — create from STTM if missing #}
+    {{ log("--- Step 0: ensure_pipeline_tables_batch ---", info=True) }}
+    {{ ensure_pipeline_tables_batch(pipeline_tables) }}
+
+    {# Stage 1: EXTRACT_SAP → _TEMP (incremental, same logic all tables) #}
     {{ log("--- Stage 1: load_raw_to_temp_multi ---", info=True) }}
     {{ load_raw_to_temp_multi(pipeline_tables) }}
 
-    {# Stage 2: _TEMP → _ERROR
-       Identifies NULL PK rows and removes them from _TEMP. #}
+    {# Stage 2: _TEMP → _ERROR (NULL PK rows removed from _TEMP) #}
     {{ log("--- Stage 2: identify_errors_multi ---", info=True) }}
     {{ identify_errors_multi(pipeline_tables) }}
 
-    {# Stage 3: _TEMP (clean rows only) → TARGET
-       STG_REFRESH_TYPE from STTM drives MERGE (DELTA) or UPDATE (FULL). #}
+    {# Stage 3: _TEMP (clean rows only) → TARGET (DELTA/FULL from control table) #}
     {{ log("--- Stage 3: load_temp_to_target_multi ---", info=True) }}
     {{ load_temp_to_target_multi(pipeline_tables) }}
 
-    {% do audit_log_update(audit_id=batch_audit_id, status='SUCCESS',
-        comments='Pipeline complete. Tables=' ~ (pipeline_tables | map(attribute='stg_entity') | join(','))) %}
+    {% do audit_log_update(
+        trans_entity = pipeline_tables[0].trans_entity,
+        audit_id     = batch_audit_id,
+        status       = 'SUCCESS',
+        comments     = 'Pipeline complete. Tables=' ~
+                       (pipeline_tables | map(attribute='stg_entity') | join(','))
+    ) %}
 
     {{ log("=== run_pipeline END | table_name=" ~ table_name ~ " ===", info=True) }}
     {{ return('SUCCESS') }}

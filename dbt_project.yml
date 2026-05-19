@@ -1,7 +1,7 @@
 # =============================================================================
 # dbt_project.yml — Kinaxis / Refresco Analytics
-# ALL configuration in this file — no environment variables needed.
-# To switch environments change audit_db and pipeline_user only.
+# target_database resolves automatically from target.name
+# No hardcoded database names anywhere in macros
 # =============================================================================
 
 name: 'kinaxis'
@@ -23,15 +23,24 @@ clean-targets:
   - "dbt_packages"
 
 # =============================================================================
-# VARS — everything lives here, nothing in dbt Cloud environment variables
-# To deploy to QA: change audit_db to REFRESCO_ANALYTICS_QA
-# To deploy to PRD: change audit_db to REFRESCO_ANALYTICS_PRD
+# VARS
+# target_database resolves from target.name — same pattern as snowflake_warehouse
+# All macros use var('target_database') — zero hardcoded DB names
 # =============================================================================
 vars:
 
-  # ── Environment (change this per environment) ──────────────────────────────
-  audit_db:       "REFRESCO_ANALYTICS_DEV"
-  pipeline_user:  "SYSTEM"
+  # ── Database — resolves per environment automatically ──────────────────────
+  target_database: >
+    {%- if   target.name in ('default', 'dev') -%}REFRESCO_ANALYTICS_DEV
+    {%- elif target.name == 'qa'               -%}REFRESCO_ANALYTICS_QA
+    {%- elif target.name == 'prd'              -%}REFRESCO_ANALYTICS_PRD
+    {%- else                                   -%}REFRESCO_ANALYTICS_DEV
+    {%- endif -%}
+
+  # ── Pipeline identity (from real project) ──────────────────────────────────
+  pipeline_user:    "adf"
+  adf_run_id:       "local"
+  adf_pipeline_name: "local"
 
   # ── Schema names ───────────────────────────────────────────────────────────
   src_schema:       "EXTRACT_SAP"
@@ -39,9 +48,10 @@ vars:
   reporting_schema: "REPORTING_EU_PLANNING"
 
   # ── Control / metadata tables ──────────────────────────────────────────────
-  audit_table:      "BATCH_AUDIT_LOG"
   audit_seq:        "BATCH_AUDIT_SEQ"
+  audit_log_suffix: "_AUDITLOG"
   row_count_table:  "SRC_TGT_ROW_COUNT"
+  control_table:    "REFRESCO_CONTROL_TABLE"
   sttm_table:       "STTM_UPDATED"
 
   # ── Table suffix conventions ───────────────────────────────────────────────
@@ -52,14 +62,12 @@ vars:
   incremental_col:          "INSERTEDAT"
   incremental_default_date: "1900-01-01"
 
-  # ── Standard column names ──────────────────────────────────────────────────
-  col_active_flag:       "ACTIVE_FLAG"
-  col_created_by:        "CREATED_BY"
-  col_modified_by:       "MODIFIED_BY"
-  col_created_date:      "CREATED_DATE"
-  col_modified_date:     "MODIFIED_DATE"
-  col_error_reason:      "ERROR_REASON"
-  col_error_captured_at: "ERROR_CAPTURED_AT"
+  # ── Standard audit column names ────────────────────────────────────────────
+  col_active_flag:  "ACTIVE_FLAG"
+  col_created_by:   "CREATED_BY"
+  col_modified_by:  "MODIFIED_BY"
+  col_created_date: "CREATED_DATE"
+  col_modified_date: "MODIFIED_DATE"
 
 # =============================================================================
 # MODELS
