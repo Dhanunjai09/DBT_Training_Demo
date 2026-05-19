@@ -1,11 +1,26 @@
 {# =============================================================================
    FILE: macros/load_raw_to_temp.sql
-   PURPOSE: Stage 1 — Incremental load from EXTRACT_SAP into _TEMP tables.
-            Same watermark logic for ALL tables:
-              First run  → target empty/missing → cutoff=1900-01-01 → all rows
-              Next runs  → cutoff=MAX(INSERTEDAT) from TARGET → new rows only
-            Watermark always read from final TARGET (not _TEMP).
-            _TEMP guaranteed to exist (created by ensure_pipeline_tables).
+   PURPOSE: Stage 1 — Incremental load from EXTRACT_SAP source into _TEMP tables.
+
+   PRE-CONDITION (CHANGED FROM v2):
+     _TEMP tables MUST already exist in Snowflake before running.
+     This macro NO LONGER auto-creates tables. Tables are pre-created by the
+     DBA/Snowflake admin, because:
+       - Source columns may be a subset of target columns
+       - CREATE TABLE privileges may not be available in all environments
+
+   WATERMARK LOGIC (same for all tables):
+     First run  → TARGET missing or empty  → cutoff = 1900-01-01 → all rows
+     Next runs  → cutoff = MAX(INSERTEDAT) from TARGET (not _TEMP) → new rows only
+     Watermark always read from final TARGET (not _TEMP).
+
+   COLUMN MAPPING:
+     Reads _TEMP columns from INFORMATION_SCHEMA (not adapter cache).
+     All column names double-quoted to handle special chars (hyphens, spaces).
+     Audit columns (CREATED_BY, MODIFIED_BY, etc.) filled from vars.
+     Source columns not in _TEMP are silently skipped.
+     _TEMP columns not in source get NULL.
+
    MACROS:
      - load_raw_to_temp(stg_entity, src_entity, trans_entity)  ← single table
      - load_raw_to_temp_multi(pipeline_tables)                 ← multi table
@@ -31,6 +46,20 @@
     {% set ROW_COUNT_TBL = TGT_DB ~ '.' ~ TGT_SCHEMA ~ '.' ~ var('row_count_table') %}
     {% set audit_user_sql = _pipeline_user_sql() %}
 
+    {# Validate _TEMP exists — fail fast with clear error if not pre-created #}
+    {% set temp_exists = run_query(
+        "SELECT COUNT(*) FROM " ~ TGT_DB ~ ".INFORMATION_SCHEMA.TABLES" ~
+        " WHERE TABLE_SCHEMA='" ~ TGT_SCHEMA ~ "'" ~
+        " AND TABLE_NAME='" ~ stg_entity ~ var('temp_suffix') ~ "'"
+    ).columns[0].values()[0] %}
+
+    {% if temp_exists == 0 %}
+        {{ exceptions.raise_compiler_error(
+            "[" ~ stg_entity ~ "] _TEMP table does not exist: " ~ TGT_TABLE ~
+            ". Pre-create it in Snowflake before running the pipeline."
+        ) }}
+    {% endif %}
+
     {% set audit_id = audit_log_insert(
         trans_entity = trans_entity,
         job_name     = 'LOAD_RAW_TO_TEMP_' ~ stg_entity,
@@ -39,7 +68,7 @@
     ) %}
 
     {# STEP 1: Watermark — same logic for all tables
-       First run : target missing or empty → cutoff = 1900-01-01 → all rows
+       First run : TARGET missing or empty → cutoff = 1900-01-01 → all rows
        Next runs : cutoff = MAX(INSERTEDAT) from TARGET → new rows only        #}
     {% set tgt_exists = run_query(
         "SELECT COUNT(*) FROM " ~ TGT_DB ~ ".INFORMATION_SCHEMA.TABLES" ~
@@ -53,10 +82,7 @@
         {% set max_val = run_query(
             "SELECT MAX(" ~ var('incremental_col') ~ ") FROM " ~ FINAL_TGT
         ).columns[0].values()[0] %}
-        {# Cast cutoff to DATE to match target INSERTEDAT column type (DATE).
-           Source INSERTEDAT is TIMESTAMP_NTZ — comparing DATE vs TIMESTAMP
-           causes rows from the same date to reload every run.
-           Casting to DATE ensures correct daily-level incremental boundary. #}
+        {# DATEADD(day,1,...) avoids DATE vs TIMESTAMP_NTZ re-load of same-day rows #}
         {% set cutoff = "TO_TIMESTAMP('" ~ var('incremental_default_date') ~ "')"
             if max_val is none
             else "DATEADD(day, 1, TO_DATE('" ~ max_val ~ "'))" %}
@@ -95,7 +121,9 @@
 
     {% else %}
 
-        {# STEP 3: Get _TEMP columns via INFORMATION_SCHEMA — no adapter cache #}
+        {# STEP 3: Get _TEMP columns via INFORMATION_SCHEMA (no adapter cache)
+           This respects the actual _TEMP DDL created in Snowflake.
+           _TEMP may have fewer columns than source — that is intentional. #}
         {% set tgt_cols = run_query(
             "SELECT COLUMN_NAME FROM " ~ TGT_DB ~ ".INFORMATION_SCHEMA.COLUMNS" ~
             " WHERE TABLE_SCHEMA='" ~ TGT_SCHEMA ~ "'" ~
@@ -109,23 +137,31 @@
             " AND TABLE_NAME='" ~ src_entity ~ "'"
         ).columns[0].values() | map('upper') | list %}
 
-        {# STEP 4: Build SELECT — map source cols, set audit cols #}
+        {# STEP 4: Build SELECT — map source cols, set audit cols.
+           All column names double-quoted to handle special chars (hyphens, spaces). #}
         {% set select_exprs = [] %}
         {% for col in tgt_cols %}
             {% set col_u = col | upper %}
-            {% if   col_u == var('col_created_by')    | upper %}{% do select_exprs.append(audit_user_sql ~ " AS " ~ col) %}
-            {% elif col_u == var('col_modified_by')   | upper %}{% do select_exprs.append(audit_user_sql ~ " AS " ~ col) %}
-            {% elif col_u == var('col_created_date')  | upper %}{% do select_exprs.append("CURRENT_DATE() AS " ~ col) %}
-            {% elif col_u == var('col_modified_date') | upper %}{% do select_exprs.append("CURRENT_DATE() AS " ~ col) %}
-            {% elif col_u in src_cols                         %}{% do select_exprs.append(col) %}
-            {% else                                           %}{% do select_exprs.append("NULL AS " ~ col) %}
+            {% set col_q = '"' ~ col ~ '"' %}
+            {% if   col_u == var('col_created_by')    | upper %}{% do select_exprs.append(audit_user_sql ~ " AS " ~ col_q) %}
+            {% elif col_u == var('col_modified_by')   | upper %}{% do select_exprs.append(audit_user_sql ~ " AS " ~ col_q) %}
+            {% elif col_u == var('col_created_date')  | upper %}{% do select_exprs.append("CURRENT_DATE() AS " ~ col_q) %}
+            {% elif col_u == var('col_modified_date') | upper %}{% do select_exprs.append("CURRENT_DATE() AS " ~ col_q) %}
+            {% elif col_u in src_cols                         %}{% do select_exprs.append(col_q) %}
+            {% else                                           %}{% do select_exprs.append("NULL AS " ~ col_q) %}
             {% endif %}
+        {% endfor %}
+
+        {# Build quoted INSERT column list #}
+        {% set tgt_col_quoted = [] %}
+        {% for c in tgt_cols %}
+            {% do tgt_col_quoted.append('"' ~ c ~ '"') %}
         {% endfor %}
 
         {# STEP 5: Insert incremental rows into _TEMP #}
         {% do run_query(
             "INSERT INTO " ~ TGT_TABLE ~
-            " (" ~ tgt_cols | join(', ') ~ ")" ~
+            " (" ~ tgt_col_quoted | join(', ') ~ ")" ~
             " SELECT " ~ select_exprs | join(', ') ~
             " FROM " ~ SRC_TABLE ~
             " WHERE " ~ var('incremental_col') ~ " > " ~ cutoff

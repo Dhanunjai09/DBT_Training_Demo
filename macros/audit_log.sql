@@ -2,7 +2,8 @@
    FILE: macros/audit_log.sql
    PURPOSE: Per-entity audit log macros.
             Each TRANS_ENTITY gets its own audit table: <TRANS_ENTITY>_AUDITLOG
-            Auto-creates audit table if it does not exist.
+            Auto-creates audit table if it does not exist (audit table only —
+            NOT source/target/temp/error tables; those are pre-created in Snowflake).
             Uses BATCH_AUDIT_SEQ for AUDIT_ID.
    MACROS:
      - _get_audit_table(trans_entity)      ← builds FQ audit table name
@@ -83,7 +84,7 @@
     ) %}
     {% if not execute %}{{ return(none) }}{% endif %}
 
-    {# Auto-create audit table if not exists #}
+    {# Auto-create audit table if not exists — only the audit table, not data tables #}
     {{ _ensure_audit_table(trans_entity) }}
 
     {% set AUDIT_TBL = _get_audit_table(trans_entity) %}

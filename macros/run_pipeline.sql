@@ -1,13 +1,20 @@
 {# =============================================================================
    FILE: macros/run_pipeline.sql
    PURPOSE: Master pipeline orchestrator — single entry point.
-            Resolves all table metadata dynamically from STTM_UPDATED.
-            Creates tables if not exist before loading.
-            Per-entity audit tables auto-created if not exist.
+
+   PRE-CONDITION (CHANGED FROM v2):
+     ALL tables (TARGET, _TEMP, _ERROR) must already exist in Snowflake.
+     Create them manually using the DDL setup script (ddl_setup.sql) BEFORE
+     running this pipeline. The pipeline will fail fast with a clear error
+     message if any required table is missing.
+
+   WHY NO AUTO-CREATE:
+     - Source columns may be a subset of target columns (target has extra cols)
+     - CREATE TABLE privileges may not be available in all environments
+     - Table DDL is controlled by the DBA, not the pipeline
 
    FULL FLOW:
      STTM_UPDATED (ACTIVE_FLAG=TRUE)
-       → Step 0: ensure_pipeline_tables_batch  (create TARGET/_TEMP/_ERROR if missing)
        → Stage 1: load_raw_to_temp_multi       (EXTRACT_SAP → _TEMP, incremental)
        → Stage 2: identify_errors_multi        (_TEMP → _ERROR, NULL PK rows)
        → Stage 3: load_temp_to_target_multi    (_TEMP clean → TARGET, DELTA/FULL)
@@ -76,9 +83,9 @@
                        ' | Tables=' ~ (pipeline_tables | map(attribute='stg_entity') | join(','))
     ) %}
 
-    {# Step 0: Ensure TARGET, _TEMP, _ERROR tables exist — create from STTM if missing #}
-    {{ log("--- Step 0: ensure_pipeline_tables_batch ---", info=True) }}
-    {{ ensure_pipeline_tables_batch(pipeline_tables) }}
+    {# NOTE: No Step 0 (ensure_pipeline_tables).
+       All TARGET / _TEMP / _ERROR tables must be pre-created in Snowflake.
+       Each stage validates table existence and raises a clear error if missing. #}
 
     {# Stage 1: EXTRACT_SAP → _TEMP (incremental, same logic all tables) #}
     {{ log("--- Stage 1: load_raw_to_temp_multi ---", info=True) }}

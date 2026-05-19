@@ -1,12 +1,20 @@
 {# =============================================================================
    FILE: macros/identify_errors.sql
    PURPOSE: Stage 2 — Identify NULL PK rows in _TEMP, move to _ERROR table.
-            PK columns read from STTM_UPDATED (STG_PRIMARYKEY=TRUE).
-            _ERROR table has SAME structure as TARGET — no extra columns.
-            Error rows deleted from _TEMP so Stage 3 loads only clean rows.
+
+   PRE-CONDITION (CHANGED FROM v2):
+     _ERROR tables MUST already exist in Snowflake before running.
+     This macro NO LONGER auto-creates tables.
+
+   LOGIC:
+     PK columns read from STTM_UPDATED (STG_PRIMARYKEY=TRUE).
+     _ERROR table has SAME structure as _TEMP — no extra columns.
+     Error rows are inserted into _ERROR then deleted from _TEMP.
+     Stage 3 therefore loads only clean rows.
+
    MACROS:
-     - identify_errors(stg_entity, trans_entity)   <- single table
-     - identify_errors_multi(pipeline_tables)       <- multi table wrapper
+     - identify_errors(stg_entity, trans_entity)   ← single table
+     - identify_errors_multi(pipeline_tables)       ← multi table wrapper
    ============================================================================= #}
 
 {% macro identify_errors(stg_entity, trans_entity) %}
@@ -16,6 +24,22 @@
     {% set STTM_TBL   = DB_SCHEMA ~ '.' ~ var('sttm_table') %}
     {% set temp_fqtn  = DB_SCHEMA ~ '.' ~ stg_entity ~ var('temp_suffix') %}
     {% set error_fqtn = DB_SCHEMA ~ '.' ~ stg_entity ~ var('error_suffix') %}
+
+    {# Validate _ERROR exists — fail fast with clear error if not pre-created #}
+    {% set TGT_DB     = var('target_database') %}
+    {% set TGT_SCHEMA = var('trans_schema') %}
+    {% set error_exists = run_query(
+        "SELECT COUNT(*) FROM " ~ TGT_DB ~ ".INFORMATION_SCHEMA.TABLES" ~
+        " WHERE TABLE_SCHEMA='" ~ TGT_SCHEMA ~ "'" ~
+        " AND TABLE_NAME='" ~ stg_entity ~ var('error_suffix') ~ "'"
+    ).columns[0].values()[0] %}
+
+    {% if error_exists == 0 %}
+        {{ exceptions.raise_compiler_error(
+            "[" ~ stg_entity ~ "] _ERROR table does not exist: " ~ error_fqtn ~
+            ". Pre-create it in Snowflake before running the pipeline."
+        ) }}
+    {% endif %}
 
     {% set audit_id = audit_log_insert(
         trans_entity = trans_entity,
@@ -72,11 +96,17 @@
             " ORDER BY ORDINAL_POSITION"
         ).columns[0].values() | list %}
 
+        {# Quote all column names to handle special chars (hyphens, spaces) #}
+        {% set quoted_cols = [] %}
+        {% for c in temp_cols %}
+            {% do quoted_cols.append('"' ~ c ~ '"') %}
+        {% endfor %}
+
         {# INSERT error rows into _ERROR — same columns, no extra error cols #}
         {% do run_query(
             "INSERT INTO " ~ error_fqtn ~
-            " (" ~ temp_cols | join(', ') ~ ")" ~
-            " SELECT " ~ temp_cols | join(', ') ~
+            " (" ~ quoted_cols | join(', ') ~ ")" ~
+            " SELECT " ~ quoted_cols | join(', ') ~
             " FROM " ~ temp_fqtn ~
             " WHERE " ~ null_condition
         ) %}

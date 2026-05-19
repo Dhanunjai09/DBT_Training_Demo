@@ -1,17 +1,25 @@
 {# =============================================================================
    FILE: macros/load_temp_to_target.sql
    PURPOSE: Stage 3 — Load clean rows from _TEMP into TARGET tables.
-            Refresh type (DELTA/FULL) read from REFRESCO_CONTROL_TABLE.
-            Client controls DELTA/FULL per table in control table.
-            TARGET auto-created by ensure_pipeline_tables (create_tables.sql).
+
+   PRE-CONDITION (CHANGED FROM v2):
+     TARGET tables MUST already exist in Snowflake before running.
+     This macro NO LONGER auto-creates TARGET tables with CREATE TABLE IF NOT EXISTS.
+     Reason: _TEMP may have fewer columns than TARGET; source DDL is authoritative.
+
+   REFRESH LOGIC:
+     DELTA  → MERGE to mark old rows ACTIVE_FLAG='N', then INSERT new rows
+     FULL   → SET ACTIVE_FLAG='N' on all, then INSERT all rows from _TEMP
+     Refresh type controlled per table in REFRESCO_CONTROL_TABLE (IS_ACTIVE='Y').
+
    MACROS:
-     - get_refresh_type(stg_entity)                            <- reads REFRESCO_CONTROL_TABLE
-     - apply_delta_merge(stg_entity, trans_entity, user)       <- MERGE using STTM PK cols
-     - apply_full_refresh(tgt_fqtn)                            <- SET ACTIVE_FLAG='N'
-     - insert_latest_rows(src_fqtn, tgt_fqtn)                  <- INSERT from _TEMP
-     - truncate_temp(temp_fqtn)                                <- cleanup after load
-     - load_temp_to_target(stg_entity, trans_entity)           <- single table
-     - load_temp_to_target_multi(pipeline_tables)              <- multi table wrapper
+     - get_refresh_type(stg_entity)                            ← reads REFRESCO_CONTROL_TABLE
+     - apply_delta_merge(stg_entity, trans_entity, user)       ← MERGE using STTM PK cols
+     - apply_full_refresh(tgt_fqtn)                            ← SET ACTIVE_FLAG='N'
+     - insert_latest_rows(src_fqtn, tgt_fqtn)                  ← INSERT from _TEMP
+     - truncate_temp(temp_fqtn)                                ← cleanup after load
+     - load_temp_to_target(stg_entity, trans_entity)           ← single table
+     - load_temp_to_target_multi(pipeline_tables)              ← multi table wrapper
    ============================================================================= #}
 
 {% macro _get_pipeline_user_value(user_name=none) %}
@@ -22,8 +30,7 @@
 
 
 {% macro get_refresh_type(stg_entity) %}
-    {# Reads from REFRESCO_CONTROL_TABLE — client controls DELTA or FULL per table.
-       TABLE_NAME in control table = stg_entity ~ '_TEMP' (same as original macro). #}
+    {# Reads from REFRESCO_CONTROL_TABLE. TABLE_NAME = stg_entity ~ '_TEMP'. #}
     {% set refresh_type = '' %}
     {% if execute %}
         {% set CTRL_TBL = var('target_database') ~ '.' ~
@@ -88,7 +95,8 @@
 
 {% macro insert_latest_rows(src_fqtn, tgt_fqtn) %}
     {% if execute %}
-        {# Get columns from _TEMP via INFORMATION_SCHEMA — no adapter cache #}
+        {# Get columns from _TEMP via INFORMATION_SCHEMA — no adapter cache.
+           All column names double-quoted to handle special chars. #}
         {% set parts   = src_fqtn.split('.') %}
         {% set col_names = run_query(
             "SELECT COLUMN_NAME FROM " ~ parts[0] ~ ".INFORMATION_SCHEMA.COLUMNS" ~
@@ -97,20 +105,21 @@
             " ORDER BY ORDINAL_POSITION"
         ).columns[0].values() | list %}
 
-        {% set insert_cols = col_names | join(', ') %}
-
-        {% set select_cols = [] %}
+        {% set quoted_insert = [] %}
+        {% set select_cols   = [] %}
         {% for c in col_names %}
+            {% set cq = '"' ~ c ~ '"' %}
+            {% do quoted_insert.append(cq) %}
             {% if c | upper == var('col_active_flag') | upper %}
-                {% do select_cols.append("NVL(" ~ c ~ ",'Y') AS " ~ c) %}
+                {% do select_cols.append("NVL(" ~ cq ~ ",'Y') AS " ~ cq) %}
             {% else %}
-                {% do select_cols.append(c) %}
+                {% do select_cols.append(cq) %}
             {% endif %}
         {% endfor %}
 
         {% do run_query(
             "INSERT INTO " ~ tgt_fqtn ~
-            " (" ~ insert_cols ~ ")" ~
+            " (" ~ quoted_insert | join(', ') ~ ")" ~
             " SELECT " ~ select_cols | join(', ') ~
             " FROM " ~ src_fqtn
         ) %}
@@ -129,10 +138,26 @@
     {% if not execute %}{{ return('') }}{% endif %}
 
     {% set DB_SCHEMA    = var('target_database') ~ '.' ~ var('trans_schema') %}
+    {% set TGT_DB       = var('target_database') %}
+    {% set TGT_SCHEMA   = var('trans_schema') %}
     {% set src_fqtn     = DB_SCHEMA ~ '.' ~ stg_entity ~ var('temp_suffix') %}
     {% set tgt_fqtn     = DB_SCHEMA ~ '.' ~ stg_entity %}
     {% set refresh_type = get_refresh_type(stg_entity) %}
     {% set eff_user     = _get_pipeline_user_value() %}
+
+    {# Validate TARGET exists — fail fast with clear error if not pre-created #}
+    {% set tgt_exists = run_query(
+        "SELECT COUNT(*) FROM " ~ TGT_DB ~ ".INFORMATION_SCHEMA.TABLES" ~
+        " WHERE TABLE_SCHEMA='" ~ TGT_SCHEMA ~ "'" ~
+        " AND TABLE_NAME='" ~ stg_entity ~ "'"
+    ).columns[0].values()[0] %}
+
+    {% if tgt_exists == 0 %}
+        {{ exceptions.raise_compiler_error(
+            "[" ~ stg_entity ~ "] TARGET table does not exist: " ~ tgt_fqtn ~
+            ". Pre-create it in Snowflake before running the pipeline."
+        ) }}
+    {% endif %}
 
     {% set audit_id = audit_log_insert(
         trans_entity = trans_entity,
@@ -140,12 +165,6 @@
         job_status   = 'RUNNING',
         comments     = 'RefreshType=' ~ refresh_type ~
                        ' | ' ~ src_fqtn ~ ' → ' ~ tgt_fqtn
-    ) %}
-
-    {# Ensure target exists before MERGE or UPDATE #}
-    {% do run_query(
-        "CREATE TABLE IF NOT EXISTS " ~ tgt_fqtn ~
-        " AS SELECT * FROM " ~ src_fqtn ~ " WHERE 1=0"
     ) %}
 
     {# Apply refresh strategy — controlled by client via REFRESCO_CONTROL_TABLE #}
