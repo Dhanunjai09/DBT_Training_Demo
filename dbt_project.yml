@@ -74,9 +74,6 @@ vars:
 # =============================================================================
 models:
   kinaxis:
-    transformation:
-      +schema: TRANSFORMATION_EU_PLANNING
-      +materialized: "table"
     +persist_docs:
       relation: true
       columns: true
