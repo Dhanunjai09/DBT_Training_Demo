@@ -78,3 +78,12 @@ models:
       relation: true
       columns: true
     +materialized: "incremental"
+    # ── EU Planning consumption layer ────────────────────────────────────────
+    # +materialized only — database and schema are controlled via the
+    # generate_schema_name and generate_database_name macros in macros/.
+    # Those macros use node.fqn (the folder path) to route each model to the
+    # correct schema and database without any hardcoding here.
+    # Adding new consumption models? Just drop the .sql into models/eu_planning/
+    # and they automatically land in REFRESCO_ANALYTICS_DEV.REPORTING_EU_PLANNING.
+    transformation:
+      +materialized: "table"

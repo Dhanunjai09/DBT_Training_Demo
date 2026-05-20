@@ -1,0 +1,205 @@
+version: 2
+
+# =============================================================================
+# sources.yml — Single source declaration file for all schemas
+# Lives at models/ root so it covers all subfolders
+#
+# Two sources:
+#   transformation → TRANSFORMATION_EU_PLANNING  (used by calendar, partuomconversion)
+#   extract_sap    → EXTRACT_SAP                 (used by eu_planning consumption models)
+#
+# Both database and schema resolve through vars — zero hardcoding.
+#
+# TODO (future): Split into domain-specific source files as model count grows
+#                e.g. sources_transformation.yml, sources_extract_sap.yml
+# =============================================================================
+
+sources:
+
+  # ---------------------------------------------------------------------------
+  # TRANSFORMATION_EU_PLANNING
+  # Intermediate/staged tables produced by the pipeline macros (run_pipeline).
+  # Used by: calendar, partuomconversion (and future transformation-layer models)
+  # ---------------------------------------------------------------------------
+  - name: transformation
+    database: "{{ var('target_database') }}"
+    schema: "{{ var('trans_schema') }}"
+    description: "Transformation layer — staged SAP tables in TRANSFORMATION_EU_PLANNING"
+
+    tables:
+      # ── Scheduling / Calendar ──────────────────────────────────────────────
+      - name: TFACS
+        description: "Factory calendar shift data — source for CALENDARDATE model"
+
+      # ── Material master ────────────────────────────────────────────────────
+      - name: MARM
+        description: "Units of measure per material — source for PARTUOMCONVERSION model"
+
+  # ---------------------------------------------------------------------------
+  # EXTRACT_SAP
+  # Raw SAP extract tables loaded directly into Snowflake.
+  # Used by: eu_planning consumption models (SITE and future entities)
+  #
+  # TODO (future): Split into domain-specific source files as table count grows
+  # ---------------------------------------------------------------------------
+  - name: extract_sap
+    database: "{{ var('target_database') }}"
+    schema: "{{ var('src_schema') }}"
+    description: "Raw SAP extract tables in EXTRACT_SAP schema"
+
+    tables:
+      # ── Plant / Site master ────────────────────────────────────────────────
+      - name: T001W
+        description: "Plant master — one row per plant (WERKS)"
+      - name: MDMA
+        description: "MRP area definition — maps WERKS to MRP area (BERID)"
+      - name: T001K
+        description: "Valuation area — links plant (BWKEY) to company code (BUKRS)"
+      - name: T001
+        description: "Company code master — holds currency (WAERS)"
+      - name: TCURT
+        description: "Currency texts — long/short descriptions per language (SPRAS)"
+      - name: ADRC
+        description: "Address master — holds TIME_ZONE keyed on ADDRNUMBER"
+      - name: T005
+        description: "Country master"
+      - name: T005U
+        description: "Country region texts"
+
+      # ── BOM / Routing ──────────────────────────────────────────────────────
+      - name: RESB
+        description: "Reservation / dependent requirements (BOM components)"
+      - name: STPO
+        description: "BOM item data"
+      - name: MAST
+        description: "Material-to-BOM link"
+      - name: STKO
+        description: "BOM header"
+      - name: CRHD
+        description: "Work centre / resource header"
+      - name: CRTX
+        description: "Work centre texts"
+      - name: MKAL
+        description: "Production versions"
+
+      # ── Scheduling / Calendar ──────────────────────────────────────────────
+      - name: TFACD
+        description: "Factory calendar — day assignments"
+      - name: TFACT
+        description: "Factory calendar — texts"
+      - name: TFACS
+        description: "Factory calendar — shift data"
+
+      # ── Purchasing ─────────────────────────────────────────────────────────
+      - name: EINA
+        description: "Purchasing info record — general data"
+      - name: EINE
+        description: "Purchasing info record — purchasing organisation data"
+      - name: EORD
+        description: "Source list"
+      - name: EKKO
+        description: "Purchasing document header"
+      - name: EKPO
+        description: "Purchasing document item"
+      - name: EKES
+        description: "Vendor confirmations"
+      - name: EKET
+        description: "Scheduling agreement delivery schedule"
+      - name: LFA1
+        description: "Vendor master — general section"
+      - name: T016T
+        description: "Industry texts"
+
+      # ── Sales / Customer ───────────────────────────────────────────────────
+      - name: KNVH
+        description: "Customer hierarchy"
+      - name: KNA1
+        description: "Customer master — general data"
+      - name: KNVV
+        description: "Customer master — sales data"
+      - name: KNVP
+        description: "Customer master — partner functions"
+      - name: T151T
+        description: "Customer group texts"
+      - name: TVTWT
+        description: "Distribution channel texts"
+      - name: TVAGT
+        description: "Sales group texts"
+      - name: VBAK
+        description: "Sales order header"
+      - name: VBAP
+        description: "Sales order item"
+      - name: VBKD
+        description: "Sales order business data"
+      - name: VBEP
+        description: "Sales order schedule lines"
+      - name: LIKP
+        description: "Delivery header"
+      - name: LIPS
+        description: "Delivery item"
+      - name: VBRK
+        description: "Billing document header"
+      - name: YXXSD_CRTL_BAPIC
+        description: "Custom sales control table"
+      - name: A005
+        description: "Condition table — material/customer"
+      - name: KONP
+        description: "Condition record items"
+
+      # ── Material master ────────────────────────────────────────────────────
+      - name: MARC
+        description: "Material master — plant data / MRP"
+      - name: MARM
+        description: "Units of measure per material"
+      - name: MARA
+        description: "Material master — general data"
+      - name: MAKT
+        description: "Material descriptions"
+      - name: MBEW
+        description: "Material valuation"
+      - name: MVKE
+        description: "Material master — sales data per plant"
+      - name: MCHA
+        description: "Batch master"
+      - name: MCHB
+        description: "Batch stocks"
+      - name: MSKU
+        description: "Special stocks at customer"
+      - name: T024
+        description: "Purchasing groups"
+      - name: T024D
+        description: "MRP controllers"
+      - name: T025T
+        description: "Valuation class texts"
+      - name: T438X
+        description: "MRP type texts"
+      - name: EQUP
+        description: "Equipment master"
+
+      # ── Classification ─────────────────────────────────────────────────────
+      - name: AUSP
+        description: "Classification characteristic values"
+      - name: CAWNT
+        description: "Characteristic value texts"
+
+      # ── Production orders ──────────────────────────────────────────────────
+      - name: AFKO
+        description: "Order header — production orders"
+      - name: AFPO
+        description: "Order item — production orders"
+      - name: PLAF
+        description: "Planned orders"
+
+      # ── Currency / Capacity ────────────────────────────────────────────────
+      - name: TCURR
+        description: "Exchange rates"
+      - name: KAKO
+        description: "Capacity header"
+
+      # ── Batch classification ───────────────────────────────────────────────
+      - name: T25A5
+        description: "Batch class type configuration"
+      - name: T25A7
+        description: "Batch search strategy"
+      - name: T25A8
+        description: "Batch search strategy items"
